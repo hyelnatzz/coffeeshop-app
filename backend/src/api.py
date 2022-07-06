@@ -1,4 +1,4 @@
-import os
+
 from flask import Flask, request, jsonify, abort
 from sqlalchemy import exc
 import json
@@ -17,7 +17,7 @@ CORS(app)
 !! NOTE THIS MUST BE UNCOMMENTED ON FIRST RUN
 !! Running this funciton will add one
 '''
-#db_drop_and_create_all()
+# db_drop_and_create_all()
 
 # ROUTES
 '''
@@ -29,18 +29,21 @@ CORS(app)
         or appropriate status code indicating reason for failure
 '''
 
-@app.route('/drinks', methods=['GET', 'POST'])
+
+@app.route('/drinks', methods=['GET'])
+# @requires_auth('get:drinks')
 def get_drinks():
+    drinks = [drink.short() for drink in Drink.query.all()]
     try:
-        drinks = [drink.short() for drink in Drink.query.all()]
         return jsonify({
             "success": True,
             "drinks": drinks
         }), 200
     except exc.SQLAlchemyError:
         abort(500)
-    except Exception:
-        abort(422)
+    except Exception as err:
+        abort(422, description=err)
+
 
 '''
 @TODO implement endpoint
@@ -48,25 +51,23 @@ def get_drinks():
         it should create a new row in the drinks table
         it should require the 'post:drinks' permission
         it should contain the drink.long() data representation
-    returns status code 200 and json {"success": True, "drinks": drink} where drink an array containing only the newly created drink
-        or appropriate status code indicating reason for failure
+    returns status code 200 and json {"success": True, "drinks": drink} where drink an array containing only the newly 
+    created drink or appropriate status code indicating reason for failure
 '''
-@app.route('/drinks', methods=['GET', 'POST'])
+
+
+@app.route('/drinks', methods=['POST'])
+@requires_auth('post:drinks')
 def add_drink():
     data = request.get_json()
     title = data.get('title', None)
-    color = data.get('color', None)
-    name = data.get('name', None)
-    parts = data.get('parts', None)
-    details = [title, name, color, parts]
+    recipe = data.get('recipe', None)
 
-    if None in details or ' ' in details:
+    if None in [title, recipe]:
         abort(400, description="incomplete drink details")
-        
-    new_drink_recipe = [{'color': color, 'name':name, 'parts':parts}]
 
     try:
-        new_drink = Drink(title=title, recipe = json.dumps(new_drink_recipe))
+        new_drink = Drink(title=title, recipe=json.dumps(recipe))
         new_drink.insert()
         drinks = [drink.long() for drink in Drink.query.all()]
         return jsonify({
@@ -75,8 +76,8 @@ def add_drink():
         }), 200
     except exc.SQLAlchemyError:
         abort(500)
-    except Exception:
-        abort(422)
+    except Exception as err:
+        abort(422, description=err)
 
 
 '''
@@ -87,7 +88,10 @@ def add_drink():
     returns status code 200 and json {"success": True, "drinks": drinks} where drinks is the list of drinks
         or appropriate status code indicating reason for failure
 '''
+
+
 @app.route('/drinks-detail')
+@requires_auth('get:drinks')
 def drinks_detail():
     try:
         drinks = [drink.long() for drink in Drink.query.all()]
@@ -97,8 +101,8 @@ def drinks_detail():
         }), 200
     except exc.SQLAlchemyError:
         abort(500)
-    except Exception:
-        abort(422)
+    except Exception as err:
+        abort(422, description=err)
 
 
 '''
@@ -109,24 +113,25 @@ def drinks_detail():
         it should update the corresponding row for <id>
         it should require the 'patch:drinks' permission
         it should contain the drink.long() data representation
-    returns status code 200 and json {"success": True, "drinks": drink} where drink an array containing only the updated drink
-        or appropriate status code indicating reason for failure
+    returns status code 200 and json {"success": True, "drinks": drink} where drink an array containing only the updated
+     drink or appropriate status code indicating reason for failure
 '''
+
+
 @app.route('/drinks/<int:drink_id>', methods=['PATCH'])
+@requires_auth('patch:drinks')
 def update_drink(drink_id):
     drink = Drink.query.get(drink_id)
 
     if not drink:
-        abort(404, description = "drink doesn't exist")
+        abort(404, description="drink doesn't exist")
 
     data = request.get_json()
     title = data.get('title', None)
-    color = data.get('color', None)
-    name = data.get('name', None)
-    parts = data.get('parts', None)
+    recipe = data.get('recipe', None)
 
     try:
-        drink_recipe = [{'color': color, 'name':name, 'parts':parts}]
+        drink_recipe = json.dumps(recipe)
         drink.title = title
         drink.recipe = drink_recipe
         drink.update()
@@ -139,8 +144,8 @@ def update_drink(drink_id):
         }), 200
     except exc.SQLAlchemyError:
         abort(500)
-    except Exception:
-        abort(422)
+    except Exception as err:
+        abort(422, description=err)
 
 
 '''
@@ -153,7 +158,10 @@ def update_drink(drink_id):
     returns status code 200 and json {"success": True, "delete": id} where id is the id of the deleted record
         or appropriate status code indicating reason for failure
 '''
+
+
 @app.route('/drinks/<int:drink_id>', methods=['DELETE'])
+@requires_auth('delete:drinks')
 def delete_drink(drink_id):
     drink = Drink.query.get(drink_id)
 
@@ -171,8 +179,8 @@ def delete_drink(drink_id):
         }), 200
     except exc.SQLAlchemyError:
         abort(500)
-    except Exception:
-        abort(422)
+    except Exception as err:
+        abort(422, description=err)
 
 
 # Error Handling
@@ -186,7 +194,7 @@ def unprocessable(error):
     return jsonify({
         "success": False,
         "error": 422,
-        "message": "unprocessable entity"
+        "message": error.description
     }), 422
 
 
@@ -200,6 +208,8 @@ def unprocessable(error):
                     }), 404
 
 '''
+
+
 @app.errorhandler(400)
 def not_found(error):
     return jsonify({
@@ -231,6 +241,8 @@ def server_error(error):
 @TODO implement error handler for 404
     error handler should conform to general task above
 '''
+
+
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({
@@ -244,9 +256,10 @@ def not_found(error):
 @TODO implement error handler for AuthError
     error handler should conform to general task above
 '''
-@app.errorhandler(AuthError)
-def unauthorized(error):
-    formatted_error = error.formatted()
-    status_code = error.get('status_code', 401)
-    return jsonify(formatted_error), status_code
 
+
+@app.errorhandler(AuthError)
+def auth_error_handler(error):
+    formatted_error = error.formatted()
+    status_code = formatted_error.get('status_code', 401)
+    return jsonify(formatted_error), status_code
